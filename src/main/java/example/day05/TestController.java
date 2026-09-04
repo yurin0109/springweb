@@ -18,7 +18,7 @@ public class TestController {
     @Autowired private TestService testService;
 
     // 1. 전체조회 
-    @GetMapping("/test")
+    @GetMapping("/we")
     public List<TestDto> 전체조회(){
         return testService.전체조회();
     }
