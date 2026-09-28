@@ -1,24 +1,26 @@
 package example.day10.model.entity;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
-
-public class ApiEntity {
-
+import lombok.NoArgsConstructor;
 
 
-// board (idx, subject, name, regdate, content)
-    @Id
+    @Entity
     @Table (name="board")
-    @Data 
+    @Data
     @AllArgsConstructor
     @NoArgsConstructor
     @Builder
     public class ApiEntity {
 
-    board (idx, subject, name, regdate, content)
+// board (idx, subject, name, regdate, content)
         @Id
         @GeneratedValue (strategy = GenerationType.IDENTITY)
         private Integer idx;
@@ -36,12 +38,4 @@ public class ApiEntity {
         private String content;
     }
 
-
-
-
-
-
-
-
-}
 

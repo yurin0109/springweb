@@ -1,5 +1,7 @@
 package example.day10.repository;
 
-public class ApiRepository {
 
+@Repository
+public interface ApiRepository extends JpaRepository<ApiEntity,Integer>{
+    
 }
