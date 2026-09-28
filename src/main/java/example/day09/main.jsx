@@ -1,0 +1,13 @@
+import { createRoot } from 'react-dom/client'
+import { BrowerRouter } from 'react-reouter-dom'
+import './index.css'
+import App from './App.jsx'
+
+createRoot(document.getElementById('root')).render(
+    <BrowserRouter>
+    <App />
+</BrowserRouter>
+)
+    
+
+
