@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,6 +19,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import lombok.Delegate;
 import lombok.RequiredArgsConstructor;
 import lombok.val;
 
@@ -90,6 +92,14 @@ public class RedisController {
         // 3. 역직렬화 : string -> 자바객체(dto/map/list 등등)
         MemberDto memberDto = objectMapper.readValue( value, MemberDto.class );
         return memberDto;
+    }
+    // [4] 삭제 , http://localhost:8080/api/redis/member?mno=1
+    @DeleteMapping("/member")
+    public boolean delete(@RequestParam(name="mno") Long mno){
+        // 1. 삭제할 mno 매개변수로 받는다.
+        String deleteKey = "member."+mno; // 2. 삭제할 key 조합하여 삭제한다.
+        boolean result = stringRedisTemplate.delete(deleteKey); //.delete(삭제할키)
+        return result;
     }
 
 

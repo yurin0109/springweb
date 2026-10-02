@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 public class MemberController {
     private final MemberService memberService;
     private final JwtUtil jwtUtil;
+    private final RedisTokenService redisTokenService;
 
     // [1] 회원가입
     @PostMapping("/signup")
@@ -35,27 +36,30 @@ public class MemberController {
         MemberDto result = memberService.login(memberDto);
         if( result == null ) return null; // 로그인 실패시
         // 2. 로그인 성공 시 쿠키 생성/발급
-        // 4. 토큰(token) 발급 요청
-        String token = jwtUtil.createToken( result.getMno() ); // mno --> jwt
-        ResponseCookie cookie = ResponseCookie.from( "login_member" , token  )
-                                .path("/") // 쿠키 사용할 경로 . "/" 도메인내 전체
-                                // Duration.ofXXX( 수 )
-                                .maxAge( Duration.ofDays(1) ) // 쿠키의 유효기간 , 1일
-                                .httpOnly(true) // JS이용한 탈취 방지 , XSS공격
-                                .secure(false) // HTPPS 에서만 사용 , 개발단계:FALSE , 배포단계:TRUE
-                                .sameSite("Lax") // CSRF 공격방어
-                                .build(); // 쿠키 생성 끝
-    // 3. 응답 헤더에 쿠키 등록 , response.setHeader()
-    // HttpHeaders 자동완성 : 스프링 꺼 쓰기
-    response.setHeader(HttpHeaders.SET_COOKIE , cookie.toString() );
-    return result;
+        // 4. 토큰(token) **2개** 발급 요청
+        String accessToken = jwtUtil.createAcessToken( result.getMno() ); // mno --> jwt
+        String refreshToken = jwtUtil.creatdRefreshToken(result.getMno());
+        // 5. refreshToken 만 **레디스** 에 저장
+        redisTokenService.setRefreshToken( result.getMno() , refreshToken );
+        // 2. 로그인 성공 시 쿠키 2개 생성/발급 , 쿠키만료기간==토큰만료기간 동일권장
+        ResponseCookie cookie1 = ResponseCookie.from( "acessToken" , accessToken  )
+                                .path("/").maxAge(Duration.ofMinutes(30) ) // 30분
+                                .httpOnly(true).secure(false).sameSite("Lax").build();
+        ResponseCookie cookie2 = ResponseCookie.from("refreshToken", refreshToken )
+                                .path("/").maxAge(Duration.ofDays(7) ) // 7일
+                                .httpOnly(true).secure(false).sameSite("Lax").build();
+                            
+        // 3. 응답 헤더에 쿠키 2개 등록 , response.setHeader()
+        response.addHeader(HttpHeaders.SET_COOKIE , cookie1.toString());
+        response.addHeader(HttpHeaders.SET_COOKIE , cookie2.toString());
+        return result;
     }
     // [3] 내정보조회 + 쿠키
     @GetMapping("/me")
     public MemberDto getMyInfo(
         // @CookieValue( value="쿠키명" ){ // 요청한 브라우저의 쿠키 가져오기
-    @CookieValue (value="login_member" , required=false ) String token ){
-    // 만약에 loginMno가 없다면 비로그인
+    @CookieValue (value="accessToken" , required=false ) String token ){
+    // 만약에 tolen가 없다면 비로그인
     if( token==null ) return null;
     // ******** 쿠키에 저장된 token 이용하여 회원번호 찾기 ********
     Long loginMno = jwtUtil.getMnoFromToken(token);
@@ -63,19 +67,59 @@ public class MemberController {
     // 참고: 문자->기본타입 변환 방법 1)래퍼클래스명.parse타입(문자)
     return memberService.getMyInfo( loginMno );
     }
-
     // [4] 로그아웃 + 쿠키
     @PostMapping ("/logout")
-    public boolean logout( HttpServletResponse response ){
-        // 1. 삭제할 쿠키명과 동일한 이름으로 maxAge(0) 하여 재발급
-        ResponseCookie cookie = ResponseCookie.from( "login_member" , "" )
-                    .path("/") // 모든 곳에서 로그아웃 가능하도록 , 전체
-                    .maxAge(0) // 바로 삭제
-                    .httpOnly(true).secure(false)
-                    .build();
-        // 2. 응답객체내 헤더에 쿠키 포함
-        response.setHeader( HttpHeaders.SET_COOKIE, cookie.toString() );
+    public boolean logout( @CookieValue(value="acessToken", required = false ) String accessToken, HttpServletResponse response ){
+        // 1. 만약에 acessToken 존재하면 회원번호 조회
+        if (accessToken != null){
+            Long mno = jwtUtil.getMnoFromToken(accessToken);
+            redisTokenService.deleteRefreshToken(mno); // 2. 만약에 회원번호 조회 되면 레디스 내 refresh 토큰 삭제하기.
+        }
+        // 3. 쿠키 2개 삭제
+        ResponseCookie cookie1 = ResponseCookie.from( "accessToken" , "" )
+                    .path("/").maxAge(0) // 0초
+                    .httpOnly(true).secure(false).build();
+        ResponseCookie cookie2 = ResponseCookie.from("refreshToken" ,"" )
+                    .path("/").maxAge(0) // 0초
+                    .httpOnly(true).secure(false).build();
+        response.addHeader( HttpHeaders.SET_COOKIE, cookie1.toString() );
+        response.addHeader( HttpHeaders.SET_COOKIE, cookie2.toString() );
         return true;
         }
+
+    // [5] acess 토큰 만료될 때 Refresh 검증 후 토큰 재발급
+    @PostMapping("/reissue")
+    public MemberDto reissue(
+        @CookieValue (value = "refreshToken" , required = false) String refreshToken,
+        HttpServletResponse response
+    ){
+        // 1. refresh 토큰 가져온다. // 존재 여부 확인
+        if( refreshToken==null ) return null;
+        // 2. refresh 토큰내 검증하여 회원번호 조회
+        Long mno = jwtUtil.getMnoFromToken(refreshToken);
+        // 3. 레디스에 저장된 refresh 토큰 꺼내기
+        String savedRefreshToken = redisTokenService.getRefreshToken(mno);
+        // 4. 만약에 레디스에 없거나 전달받은 토큰과 다르면 / 문제발생!
+        if(savedRefreshToken == null || !refreshToken.equals(savedRefreshToken) ){
+            redisTokenService.deleteRefreshToken(mno); // 다르면 토큰 삭제하여 자동 로그아웃
+        }
+    // 5. 새로운 accessToken 가 RefreshToken 재발급 (기존 토큰들은 무효화)
+    String newAcessToken = jwtUtil.createAcessToken( mno );
+    String newRefreshToken = jwtUtil.creatdRefreshToken( mno );
+    // 6. 레디스에 새로운 refresh 토큰 저장
+    redisTokenService.setRefreshToken(mno, newRefreshToken);
+    // 7. 쿠키 설정
+    ResponseCookie cookie1 = ResponseCookie.from("acessToken" , newAcessToken)
+                .path("/").maxAge(Duration.ofMinutes(30) ) // 30분
+                .httpOnly(true).secure(false).sameSite("Lax").build();
+    ResponseCookie cookie2 = ResponseCookie.from("refreshToken", newRefreshToken)
+                .path("/").maxAge(Duration.ofDays(7) ) // 7일
+                .httpOnly(true).secure(false).sameSite("Lax").build();
+
+    // 8. header 에 2개 이상 쿠키 포함한 경우 .addHeader() [ o ]    .setHeader() [ x ]
+    response.addHeader( HttpHeaders.SET_COOKIE , cookie1.toString() );
+    response.addHeader( HttpHeaders.SET_COOKIE, cookie2.toString() );
+    return memberService.getMyInfo(mno); // 9. 토큰 재발급 회원정보 반환
+    }
 
 }
