@@ -42,9 +42,13 @@ dependencies { // start.spring.io
    	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
 	// 10.  implementation 'org.springframework.ai:spring-ai-starter-vector-store-redis'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	// 11. web socket
+	implementation 'org.springframework.boot:spring-boot-starter-websocket'
 
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	
 }
 
 tasks.named('test') {
